@@ -1,0 +1,7 @@
+node_modules/
+.env
+data/
+vendor/
+.wappy/
+*.log
+.DS_Store
