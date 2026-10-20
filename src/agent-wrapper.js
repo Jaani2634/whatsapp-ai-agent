@@ -32,7 +32,7 @@ import {
 } from './handover.js';
 import { HANDOVER_TOKEN, think, rememberTurn, recallRecent } from './brain.js';
 import { mediaToText } from './media.js';
-import { sendText } from './whatsapp.js';
+import { sendText, sendDirectText } from './whatsapp.js';
 
 const MEDIA_KINDS = new Set(['voice', 'audio', 'image', 'video', 'document', 'location']);
 
@@ -48,6 +48,23 @@ const TAKE_MESSAGE_REPLY =
   'Ye baat main ne note kar li hai aur Junaid tak pahuncha di hai — wo khud aap ko is ka jawab de dega. Tab tak, aap kuch aur batayein? 😊';
 
 export function createHandoverAgent({ channel, brain, handover, mediaCtx, ownerNumber, memoryClient }) {
+  /**
+   * Owner alerts go DIRECT to Meta (sendDirectText), never through the
+   * channel: the channel's in-memory 24h-window tracker forgets the owner
+   * on every restart and silently queues alerts (bug found Oct 20 — a
+   * confirmed handover produced no alert and no error). Failures here are
+   * logged loudly so they can never vanish again.
+   */
+  async function alertOwner(text) {
+    const r = await sendDirectText(ownerNumber, text);
+    if (r.status === 'sent') {
+      console.log(`[alert] owner alert delivered to +${ownerNumber}`);
+    } else {
+      console.error(`[alert] OWNER ALERT FAILED to +${ownerNumber}: ${r.reason}`);
+    }
+    return r;
+  }
+
   async function doHandover(customerNumber, reason) {
     const recent = await recallRecent(brain, customerNumber, 6);
     const summary = recent
@@ -55,14 +72,16 @@ export function createHandoverAgent({ channel, brain, handover, mediaCtx, ownerN
       .join('\n');
     await handover.handover(customerNumber, reason, summary);
     // 1) customer auto-reply (Roman Urdu)
-    await sendText(channel, customerNumber, CUSTOMER_HANDOVER_REPLY).catch((e) =>
-      console.warn('[handover] customer auto-reply failed:', e.message),
-    );
-    // 2) owner alert with summary + resume command
+    const custResult = await sendText(channel, customerNumber, CUSTOMER_HANDOVER_REPLY).catch((e) => {
+      console.warn('[handover] customer auto-reply failed:', e.message);
+      return null;
+    });
+    if (custResult && custResult.status !== 'sent') {
+      console.warn(`[handover] customer auto-reply not sent (${custResult.status}: ${custResult.reason || ''})`);
+    }
+    // 2) owner alert with summary + resume command — DIRECT send (see alertOwner)
     const alert = ownerHandoverAlert({ customerNumber, reason, recentTurns: recent });
-    await sendText(channel, ownerNumber, alert).catch((e) =>
-      console.warn('[handover] owner alert failed:', e.message),
-    );
+    await alertOwner(alert);
     console.log(`[handover] ${customerNumber} -> human (reason: ${reason})`);
   }
 
@@ -189,11 +208,9 @@ export function createHandoverAgent({ channel, brain, handover, mediaCtx, ownerN
         if (hasSensitiveTopic(userText)) {
           // Sensitive topic: alert the owner right away, but the bot keeps
           // chatting (no pause without the visitor asking for Junaid).
-          await sendText(
-            channel,
-            ownerNumber,
+          await alertOwner(
             `📝 Sensitive note: +${from} ne kaha: "${userText.slice(0, 200)}"\nBot chat jaari rakhe hai — aap chahein to khud is chat mein aa sakte hain.`,
-          ).catch((e) => console.warn('[note] owner alert failed:', e.message));
+          );
         }
 
         // 5) Brain
@@ -218,11 +235,9 @@ export function createHandoverAgent({ channel, brain, handover, mediaCtx, ownerN
           const cleaned = replyText.replaceAll(HANDOVER_TOKEN, '').trim();
           const noteReply = cleaned || TAKE_MESSAGE_REPLY;
           console.log(`[note] ${from} brain bailed; note taken, chat stays active`);
-          await sendText(
-            channel,
-            ownerNumber,
+          await alertOwner(
             `📝 Note: +${from} ne kaha: "${userText.slice(0, 200)}"\nBot is ka jawab nahi de paya — baat note karke chat jaari rakhi hai. (Poori list: notes)`,
-          ).catch((e) => console.warn('[note] owner alert failed:', e.message));
+          );
           await rememberTurn(brain, { contactId: from, role: 'agent', text: noteReply });
           const noteResult = await sendText(channel, from, noteReply);
           return { ...noteResult, reason: 'note_taken' };
