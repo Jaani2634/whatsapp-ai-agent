@@ -12,9 +12,10 @@ import { initBrain } from './brain.js';
 import { HandoverStore, normalizePhone } from './handover.js';
 import { createChannel, createServer } from './whatsapp.js';
 import { createHandoverAgent } from './agent-wrapper.js';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
+import { createServer as createHttpServer } from 'node:http';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -93,7 +94,26 @@ async function main() {
     memoryClient,
   });
 
-  const server = createServer({ channel, agent });
+  // Wrap the SDK's webhook server so the same port can also serve the
+  // coexistence signup page at /signup (docs/signup.html) — this avoids
+  // needing GitHub Pages / any external hosting for the one-time connect.
+  const sdkServer = createServer({ channel, agent });
+  const sdkHandler = sdkServer.listeners('request')[0];
+  let signupHtml = '';
+  try {
+    signupHtml = readFileSync(join(ROOT, 'docs', 'signup.html'), 'utf8');
+  } catch {
+    console.warn('[warn] docs/signup.html not found — /signup page disabled');
+  }
+  const server = createHttpServer((req, res) => {
+    const path = (req.url || '').split('?')[0];
+    if ((path === '/signup' || path === '/signup.html') && signupHtml) {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(signupHtml);
+      return;
+    }
+    return sdkHandler(req, res);
+  });
   const port = Number(process.env.PORT || process.env.SERVER_PORT || 3000);
   server.listen(port, () => {
     console.log(`[bot] listening on :${port} — webhook path /webhook`);
