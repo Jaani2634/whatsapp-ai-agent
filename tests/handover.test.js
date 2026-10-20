@@ -9,6 +9,9 @@ import {
   HandoverStore,
   STATES,
   wantsHuman,
+  asksForJunaid,
+  isYesReply,
+  isNoReply,
   hasSensitiveTopic,
   parseOwnerCommand,
   normalizePhone,
@@ -91,6 +94,52 @@ describe('sensitive topics', () => {
     assert.equal(hasSensitiveTopic('yeh kitne ka hai?'), false);
     delete process.env.HANDOVER_SENSITIVE_TOPICS;
     assert.equal(hasSensitiveTopic('I want a refund please'), false);
+  });
+});
+
+describe('confirm-first flow (owner rule, Oct 20)', () => {
+  const triggers = [
+    'junaid kahan hai',
+    'Junaid kahan hai?',
+    'us se baat krni hai',
+    'us se baat krwao',
+    'wo kahan hai',
+    'kahan hai wo',
+    'where is junaid',
+    'where is he?',
+    'i want to talk to him',
+    'unse baat karni hai mujhe',
+  ];
+  for (const t of triggers) {
+    it(`asks first: "${t}"`, () => assert.equal(asksForJunaid(t), true));
+  }
+  const calm = ['kia hal hai', 'shukriya', 'aap ka naam kya hai', 'ok done', 'khana khaya?'];
+  for (const t of calm) {
+    it(`no ask: "${t}"`, () => assert.equal(asksForJunaid(t), false));
+  }
+
+  it('yes replies confirm', () => {
+    for (const t of ['han', 'Han bilkul', 'yes', 'ji', 'kar do', 'bhej do', 'zaroor', 'ok', 'mujhe baat karni hai'])
+      assert.equal(isYesReply(t), true, t);
+  });
+  it('no replies decline (and never count as yes)', () => {
+    for (const t of ['nahi', 'no', 'rehne do', 'nahi chahiye', 'mat karo']) {
+      assert.equal(isNoReply(t), true, t);
+      assert.equal(isYesReply(t), false, t);
+    }
+  });
+
+  it('pending confirm state round-trips and clears', async () => {
+    const s = new HandoverStore(createClient({ url: ':memory:' }));
+    await s.init();
+    assert.equal(await s.isPendingConfirm('923111111111'), false);
+    await s.setPendingConfirm('923111111111');
+    assert.equal(await s.isPendingConfirm('923111111111'), true);
+    assert.equal(await s.isHandedOver('923111111111'), false);
+    await s.clearPendingConfirm('923111111111');
+    assert.equal(await s.isPendingConfirm('923111111111'), false);
+    const after = await s.get('923111111111');
+    assert.equal(after.state, STATES.BOT_ACTIVE);
   });
 });
 

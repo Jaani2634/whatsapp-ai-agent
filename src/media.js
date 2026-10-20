@@ -20,6 +20,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
+import { createRequire } from 'node:module';
 import { downloadWhatsAppMedia } from '@wappy_ai/whatsapp';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -32,10 +33,26 @@ const LIMITS = {
 
 const WHISPER_MODEL = 'whisper-large-v3-turbo'; // verified live via Groq API 2026-10-19
 
+let cachedFfmpeg = null;
+
+// Resolution order: vendored binary → FFMPEG_PATH env → @ffmpeg-installer
+// package (ships a real binary as an npm dep — works on hosts with no system
+// ffmpeg and no postinstall scripts, e.g. Botkeep) → system 'ffmpeg'.
 function resolveFfmpeg() {
+  if (cachedFfmpeg) return cachedFfmpeg;
   const vendor = join(ROOT, 'vendor', 'ffmpeg');
-  if (existsSync(vendor)) return vendor;
-  return 'ffmpeg'; // system fallback (may not exist -> caught & reported)
+  if (existsSync(vendor)) return (cachedFfmpeg = vendor);
+  if (process.env.FFMPEG_PATH && existsSync(process.env.FFMPEG_PATH)) {
+    return (cachedFfmpeg = process.env.FFMPEG_PATH);
+  }
+  try {
+    const req = createRequire(import.meta.url);
+    const installer = req('@ffmpeg-installer/ffmpeg');
+    if (installer?.path && existsSync(installer.path)) return (cachedFfmpeg = installer.path);
+  } catch {
+    /* package not installed — fall through */
+  }
+  return (cachedFfmpeg = 'ffmpeg'); // system fallback (may not exist -> caught & reported)
 }
 
 function ff(args, timeoutMs = 120000) {

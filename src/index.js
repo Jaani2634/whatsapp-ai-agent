@@ -14,11 +14,19 @@ import { createChannel, createServer } from './whatsapp.js';
 import { createHandoverAgent } from './agent-wrapper.js';
 import { existsSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
+import { createRequire } from 'node:module';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 function ffmpegAvailable() {
   if (existsSync(join(ROOT, 'vendor', 'ffmpeg'))) return true;
+  if (process.env.FFMPEG_PATH && existsSync(process.env.FFMPEG_PATH)) return true;
+  try {
+    const installer = createRequire(import.meta.url)('@ffmpeg-installer/ffmpeg');
+    if (installer?.path && existsSync(installer.path)) return true;
+  } catch {
+    /* not installed */
+  }
   try {
     execFileSync('ffmpeg', ['-version'], { stdio: 'ignore' });
     return true;

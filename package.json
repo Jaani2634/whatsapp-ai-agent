@@ -1,6 +1,7 @@
 {
   "dependencies": {
     "@ai-sdk/openai": "2.0.135",
+    "@ffmpeg-installer/ffmpeg": "1.1.0",
     "@libsql/client": "0.18.0",
     "@wappy_ai/core": "0.1.1",
     "@wappy_ai/harness": "0.1.1",

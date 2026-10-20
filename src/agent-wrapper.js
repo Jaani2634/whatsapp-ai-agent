@@ -5,7 +5,8 @@
  *   1. Owner commands (from OWNER_PHONE_NUMBER): resume|pause|status
  *   2. Handover state check — handed-over chats get silence (no reply)
  *   3. Media -> text (voice notes, images, videos) via media.js
- *   4. Human-request keywords / sensitive topics -> handover
+ *   4. Signs the visitor wants Junaid -> bot ASKS to confirm first;
+ *      only a clear "yes" in the next message hands over + alerts owner
  *   5. Brain reply (Groq) -> memory persisted
  *   6. [[HANDOVER]] token from the brain -> take a note + alert owner,
  *      but KEEP CHATTING (never pause from here — pause is step 4 only)
@@ -17,11 +18,16 @@
 import {
   HandoverStore,
   wantsHuman,
+  asksForJunaid,
+  isYesReply,
+  isNoReply,
   hasSensitiveTopic,
   parseOwnerCommand,
   normalizePhone,
   CUSTOMER_HANDOVER_REPLY,
   CUSTOMER_RESUME_REPLY,
+  CUSTOMER_CONFIRM_ASK,
+  CUSTOMER_CONFIRM_DECLINED,
   ownerHandoverAlert,
 } from './handover.js';
 import { HANDOVER_TOKEN, think, rememberTurn, recallRecent } from './brain.js';
@@ -155,14 +161,39 @@ export function createHandoverAgent({ channel, brain, handover, mediaCtx, ownerN
 
         await rememberTurn(brain, { contactId: from, role: 'user', text: userText });
 
-        // 4) Explicit human request / sensitive topic -> handover before the brain
-        if (wantsHuman(userText)) {
-          await doHandover(from, 'customer_asked_for_human');
-          return { status: 'sent', reason: 'handover' };
+        // 4) Handover is CONFIRM-FIRST (owner's rule, Oct 20): any sign the
+        // visitor wants Junaid himself ("Junaid kahan hai", "us se baat
+        // krwao", "wo kahan hai", explicit human requests...) only makes the
+        // bot ASK. The handover + owner alert fire only when the visitor
+        // confirms with a clear "yes" in their next message.
+        if (await handover.isPendingConfirm(from)) {
+          if (isYesReply(userText)) {
+            await doHandover(from, 'customer_confirmed_talk_to_junaid');
+            return { status: 'sent', reason: 'handover_confirmed' };
+          }
+          await handover.clearPendingConfirm(from);
+          if (isNoReply(userText)) {
+            await rememberTurn(brain, { contactId: from, role: 'agent', text: CUSTOMER_CONFIRM_DECLINED });
+            await sendText(channel, from, CUSTOMER_CONFIRM_DECLINED);
+            return { status: 'sent', reason: 'handover_declined' };
+          }
+          // Any other reply: confirmation lapses, message flows on normally.
+        }
+        if (wantsHuman(userText) || asksForJunaid(userText)) {
+          await handover.setPendingConfirm(from);
+          await rememberTurn(brain, { contactId: from, role: 'agent', text: CUSTOMER_CONFIRM_ASK });
+          await sendText(channel, from, CUSTOMER_CONFIRM_ASK);
+          console.log(`[handover] ${from} asked for Junaid — confirmation requested`);
+          return { status: 'sent', reason: 'handover_confirm_asked' };
         }
         if (hasSensitiveTopic(userText)) {
-          await doHandover(from, 'sensitive_topic');
-          return { status: 'sent', reason: 'handover' };
+          // Sensitive topic: alert the owner right away, but the bot keeps
+          // chatting (no pause without the visitor asking for Junaid).
+          await sendText(
+            channel,
+            ownerNumber,
+            `📝 Sensitive note: +${from} ne kaha: "${userText.slice(0, 200)}"\nBot chat jaari rakhe hai — aap chahein to khud is chat mein aa sakte hain.`,
+          ).catch((e) => console.warn('[note] owner alert failed:', e.message));
         }
 
         // 5) Brain
