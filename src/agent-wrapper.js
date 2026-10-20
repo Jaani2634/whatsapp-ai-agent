@@ -7,7 +7,8 @@
  *   3. Media -> text (voice notes, images, videos) via media.js
  *   4. Human-request keywords / sensitive topics -> handover
  *   5. Brain reply (Groq) -> memory persisted
- *   6. [[HANDOVER]] token from the brain -> handover (can't answer)
+ *   6. [[HANDOVER]] token from the brain -> take a note + alert owner,
+ *      but KEEP CHATTING (never pause from here — pause is step 4 only)
  *   7. Send reply via the WhatsApp channel
  *
  * Nothing here throws to the webhook server: every step degrades to a safe
@@ -31,6 +32,14 @@ const MEDIA_KINDS = new Set(['voice', 'audio', 'image', 'video', 'document', 'lo
 
 const FALLBACK_REPLY =
   'Maazrat, is waqt jawab dene mein dikkat ho rahi hai. Thodi der baad dobara koshish karein. 🙏';
+
+// Brain wanted to bail (token) but the customer never explicitly asked for a
+// human in THIS message: keep the chat alive, take the note, alert the owner —
+// do NOT hand over. Per the owner (Oct 20): the bot keeps chatting; handover
+// happens only on an explicit "mujh se baat karni hai" in the current message
+// (step 4) — never from stale conversation context.
+const TAKE_MESSAGE_REPLY =
+  'Ye baat main ne note kar li hai aur Junaid tak pahuncha di hai — wo khud aap ko is ka jawab de dega. Tab tak, aap kuch aur batayein? 😊';
 
 export function createHandoverAgent({ channel, brain, handover, mediaCtx, ownerNumber, memoryClient }) {
   async function doHandover(customerNumber, reason) {
@@ -170,10 +179,22 @@ export function createHandoverAgent({ channel, brain, handover, mediaCtx, ownerN
           return { status: 'sent', reason: 'empty_reply_fallback' };
         }
 
-        // 6) Brain-initiated handover
+        // 6) Brain wanted to hand over — but step 4 already handled explicit
+        // requests in THIS message. A token here means "I can't answer /
+        // stale context" → take a note, alert the owner, KEEP CHATTING.
+        // The chat is never paused from here.
         if (replyText.includes(HANDOVER_TOKEN)) {
-          await doHandover(from, 'brain_could_not_answer');
-          return { status: 'sent', reason: 'handover' };
+          const cleaned = replyText.replaceAll(HANDOVER_TOKEN, '').trim();
+          const noteReply = cleaned || TAKE_MESSAGE_REPLY;
+          console.log(`[note] ${from} brain bailed; note taken, chat stays active`);
+          await sendText(
+            channel,
+            ownerNumber,
+            `📝 Note: +${from} ne kaha: "${userText.slice(0, 200)}"\nBot is ka jawab nahi de paya — baat note karke chat jaari rakhi hai. (Poori list: notes)`,
+          ).catch((e) => console.warn('[note] owner alert failed:', e.message));
+          await rememberTurn(brain, { contactId: from, role: 'agent', text: noteReply });
+          const noteResult = await sendText(channel, from, noteReply);
+          return { ...noteResult, reason: 'note_taken' };
         }
 
         // 7) Send
