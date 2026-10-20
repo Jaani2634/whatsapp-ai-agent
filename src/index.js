@@ -86,7 +86,7 @@ async function main() {
   });
 
   const server = createServer({ channel, agent });
-  const port = Number(process.env.PORT || 3000);
+  const port = Number(process.env.PORT || process.env.SERVER_PORT || 3000);
   server.listen(port, () => {
     console.log(`[bot] listening on :${port} — webhook path /webhook`);
     console.log(`[bot] owner: +${ownerNumber} | model: ${brain.modelId}`);
