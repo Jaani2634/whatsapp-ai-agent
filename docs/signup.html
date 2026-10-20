@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Connect WhatsApp — Junaid's Bot</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 0; background: #0b141a; color: #e9edef;
+         display: flex; min-height: 100vh; align-items: center; justify-content: center; }
+  .card { max-width: 520px; width: 92%; background: #111b21; border-radius: 16px; padding: 28px; }
+  h1 { font-size: 22px; margin: 0 0 8px; }
+  p { color: #aebac1; line-height: 1.5; }
+  button { background: #00a884; color: #fff; border: 0; border-radius: 24px;
+           padding: 14px 26px; font-size: 17px; cursor: pointer; width: 100%; margin: 14px 0; }
+  button:active { opacity: .85; }
+  #status { background: #202c33; border-radius: 10px; padding: 12px 14px; min-height: 22px; }
+  .field { margin-top: 14px; }
+  .field label { display: block; font-size: 13px; color: #aebac1; margin-bottom: 5px; }
+  .row { display: flex; gap: 8px; }
+  .row input { flex: 1; background: #202c33; border: 1px solid #2a3942; color: #e9edef;
+               border-radius: 8px; padding: 10px; font-size: 13px; }
+  .row button { width: auto; margin: 0; padding: 10px 16px; font-size: 14px; border-radius: 8px; }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>🤖 Bot ko apne number se jorein</h1>
+  <p>Neeche wala button dabayein, Facebook se login karein, apna
+     <b>WhatsApp Business number (0371 6248783)</b> select karein, aur phir
+     WhatsApp Business App mein jo confirmation aye use approve karein.
+     Aapka number app mein bhi chalta rahega — ye sirf bot ko sath jorta hai.</p>
+  <button onclick="launchSignup()">Connect WhatsApp Number</button>
+  <div id="status">Ready. Button dabayein to shuru karein.</div>
+
+  <div id="result" class="hidden">
+    <p><b>Ye maloomat Gimi ko bhej dein</b> (copy karke ya screenshot):</p>
+    <div class="field"><label>Code</label>
+      <div class="row"><input id="f-code" readonly><button onclick="copyF('f-code')">Copy</button></div></div>
+    <div class="field"><label>WABA ID</label>
+      <div class="row"><input id="f-waba" readonly><button onclick="copyF('f-waba')">Copy</button></div></div>
+    <div class="field"><label>Phone Number ID</label>
+      <div class="row"><input id="f-phone" readonly><button onclick="copyF('f-phone')">Copy</button></div></div>
+  </div>
+</div>
+
+<script>
+  const APP_ID = '1788187335823696';
+  const CONFIG_ID = '2098823957505970';
+  const data = { code: null, waba_id: null, phone_number_id: null };
+
+  function setStatus(t) { document.getElementById('status').textContent = t; }
+  function render() {
+    if (data.code || data.waba_id) document.getElementById('result').classList.remove('hidden');
+    document.getElementById('f-code').value = data.code || '(abhi nahi aya)';
+    document.getElementById('f-waba').value = data.waba_id || '(abhi nahi aya)';
+    document.getElementById('f-phone').value = data.phone_number_id || '(abhi nahi aya)';
+  }
+  function copyF(id) {
+    const el = document.getElementById(id);
+    el.select();
+    navigator.clipboard && navigator.clipboard.writeText(el.value);
+    setStatus('Copy ho gaya: ' + id.replace('f-', ''));
+  }
+
+  window.addEventListener('message', (event) => {
+    if (!String(event.origin).endsWith('facebook.com')) return;
+    try {
+      const msg = JSON.parse(event.data);
+      if (msg.type === 'WA_EMBEDDED_SIGNUP') {
+        if (msg.event && String(msg.event).startsWith('FINISH')) {
+          data.waba_id = msg.data.waba_id;
+          data.phone_number_id = msg.data.phone_number_id;
+          setStatus('Signup mukammal! Neeche wali maloomat Gimi ko bhej dein.');
+          render();
+        } else if (msg.event === 'CANCEL') {
+          setStatus('Flow band ho gaya tha — dobara button dabayein.');
+        }
+      }
+    } catch (e) { /* not a signup event */ }
+  });
+
+  function launchSignup() {
+    if (typeof FB === 'undefined') { setStatus('Facebook abhi load ho raha hai — 5 second ruk kar dobara dabayein.'); return; }
+    setStatus('Facebook window khul raha hai...');
+    FB.login(function (response) {
+      if (response.authResponse && response.authResponse.code) {
+        data.code = response.authResponse.code;
+        setStatus('Code mil gaya! Neeche wali maloomat Gimi ko bhej dein.');
+        render();
+      } else {
+        setStatus('Login mukammal nahi huwa — dobara koshish karein.');
+      }
+    }, {
+      config_id: CONFIG_ID,
+      response_type: 'code',
+      override_default_response_type: true,
+      extras: { setup: {}, featureType: 'whatsapp_business_app_onboarding', sessionInfoVersion: '3' }
+    });
+  }
+</script>
+<script async defer crossorigin="anonymous" src="https://connect.facebook.net/en_US/sdk.js"></script>
+<script>
+  window.fbAsyncInit = function () {
+    FB.init({ appId: APP_ID, autoLogAppEvents: true, xfbml: false, version: 'v21.0' });
+  };
+</script>
+</body>
+</html>
