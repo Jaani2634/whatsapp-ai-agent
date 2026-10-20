@@ -88,7 +88,7 @@ message with the reason, recent messages, and the resume command.
 | Customer sends | Bot does |
 |---|---|
 | Voice note / audio (ogg/opus) | ffmpeg → 16 kHz wav → Groq Whisper `whisper-large-v3-turbo` → transcript becomes the message |
-| Image | Gemini vision (`gemini-2.0-flash`) → 2–3 sentence description |
+| Image | Gemini vision (`gemini-flash-latest`) → 2–3 sentence description |
 | Video | 3 frames → Gemini + audio track → Whisper → combined summary |
 | Document / location | acknowledged as text |
 

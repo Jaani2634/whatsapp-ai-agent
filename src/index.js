@@ -87,7 +87,7 @@ async function main() {
       accessToken: process.env.WHATSAPP_ACCESS_TOKEN,
       groqKey: process.env.GROQ_API_KEY,
       geminiKey: process.env.GEMINI_API_KEY || null,
-      geminiModel: process.env.GEMINI_MODEL || 'gemini-2.0-flash',
+      geminiModel: process.env.GEMINI_MODEL || 'gemini-flash-latest', // 2.0-flash retired by Google (404, Oct 2026); the alias tracks the current Flash
     },
     ownerNumber,
     memoryClient,
