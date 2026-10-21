@@ -10,9 +10,10 @@ import { fileURLToPath } from 'node:url';
 import { memoryClient, knowledgeClient, handoverClient } from './store.js';
 import { initBrain } from './brain.js';
 import { HandoverStore, normalizePhone } from './handover.js';
-import { createChannel, createServer } from './whatsapp.js';
+import { createChannel, createServer, sendDirectText } from './whatsapp.js';
 import { createHandoverAgent } from './agent-wrapper.js';
-import { existsSync, readFileSync } from 'node:fs';
+import { createSignupFlow } from './signup-link.js';
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { createServer as createHttpServer } from 'node:http';
@@ -105,11 +106,37 @@ async function main() {
   } catch {
     console.warn('[warn] docs/signup.html not found — /signup page disabled');
   }
+  // "Seedha link" signup flow (no JS SDK): /signup2 -> FB dialog (full-page
+  // redirect), /signup-done receives the code, saves it and alerts the owner.
+  const signupFlow = createSignupFlow({
+    saveCode: (code) => {
+      const dir = join(ROOT, 'data');
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(
+        join(dir, 'signup-code.json'),
+        JSON.stringify({ code, at: new Date().toISOString() }),
+      );
+    },
+    notify: (text) => sendDirectText(ownerNumber, text),
+  });
   const server = createHttpServer((req, res) => {
     const path = (req.url || '').split('?')[0];
     if ((path === '/signup' || path === '/signup.html') && signupHtml) {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
       res.end(signupHtml);
+      return;
+    }
+    if (path === '/signup2') {
+      const host = req.headers['x-forwarded-host'] || req.headers.host || '';
+      const origin = host.endsWith('bot-keep.xyz')
+        ? `https://${host}`
+        : 'https://7a9ngx.bot-keep.xyz';
+      res.writeHead(302, { Location: signupFlow.dialogUrl(origin) });
+      res.end();
+      return;
+    }
+    if (path === '/signup-done') {
+      void signupFlow.handleDone(new URL(req.url, 'http://localhost'), res);
       return;
     }
     return sdkHandler(req, res);
